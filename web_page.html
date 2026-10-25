@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Secure Classroom Voting - Demo</title>
+<style>
+body{font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f3f5f8;margin:0;color:#1f2933}
+.banner{background:#b42318;color:#fff;text-align:center;padding:8px;font-weight:600}
+main{max-width:760px;margin:20px auto;padding:0 14px}
+.card{background:#fff;border-radius:10px;padding:18px 22px;margin-bottom:16px;box-shadow:0 1px 3px #0002}
+h1{font-size:22px;margin:8px 0}h2{font-size:17px;margin:0 0 10px}
+input{padding:8px;border:1px solid #c5ccd6;border-radius:6px;font-size:14px;margin:3px 0;width:220px}
+button{padding:8px 14px;border:0;border-radius:6px;background:#2563eb;color:#fff;font-size:14px;cursor:pointer;margin:4px 4px 4px 0}
+button.grey{background:#64748b}button.red{background:#b42318}
+.tabs button{background:#e2e8f0;color:#1f2933}.tabs button.on{background:#2563eb;color:#fff}
+.msg{padding:8px 10px;border-radius:6px;margin-top:8px;display:none}.msg.ok{background:#dcfce7;display:block}.msg.bad{background:#fee2e2;display:block}
+label.c{display:block;padding:6px 0;font-size:15px}code{background:#eef2f7;padding:2px 5px;border-radius:4px;word-break:break-all}
+table{border-collapse:collapse}td,th{border:1px solid #d5dbe3;padding:4px 10px;font-size:13px}small{color:#5f6b7a}
+.hide{display:none}
+</style></head><body>
+<div class="banner">DEMO ONLY - test accounts and passphrase are public. Not a real election.</div>
+<main>
+<h1>Class Representative Election</h1>
+<div id="status" class="card"></div>
+<div class="tabs"><button id="t1" class="on" onclick="tab(1)">Student</button><button id="t2" onclick="tab(2)">Admin</button></div>
+
+<div id="student">
+ <div class="card" id="loginCard"><h2>1. Login</h2>
+  <input id="sid" placeholder="Student ID (e.g. S001)"><br><input id="pw" type="password" placeholder="Password"><br>
+  <button onclick="login()">Login and get my token</button>
+  <div id="loginMsg" class="msg"></div>
+  <p><small>Demo accounts: <b>S001</b>/<b>pass001</b>, S002/pass002 ... <b>S010</b>/<b>pass010</b>. Each account can get only one token.</small></p>
+ </div>
+ <div class="card"><h2>2. Vote</h2>
+  <div>Your one-time token:<br><input id="token" style="width:100%" placeholder="token appears here after login (or paste one)"></div>
+  <div id="cands"></div>
+  <button onclick="confirmVote()">Submit vote</button>
+  <div id="voteMsg" class="msg"></div>
+ </div>
+</div>
+
+<div id="admin" class="hide">
+ <div class="card"><h2>Admin panel</h2>
+  <p><small>Demo admin passphrase: <code>demo-admin-2026</code></small></p>
+  <input id="pass" type="password" placeholder="Admin passphrase"><br>
+  <input id="dl" type="datetime-local"> <button onclick="setDeadline()">Set deadline</button><br>
+  <button class="grey" onclick="closeVoting()">Close voting now</button>
+  <button onclick="count()">Decrypt and count</button>
+  <div id="adminMsg" class="msg"></div>
+  <div id="results"></div>
+ </div>
+ <div class="card"><h2>Reset demo</h2><p><small>Clears all votes and tokens, makes a new AES key, and reopens voting for 7 days.</small></p>
+  <button class="red" onclick="resetDemo()">Reset demo</button></div>
+ <div class="card"><h2>What is stored in the votes table?</h2><button class="grey" onclick="peek()">Show first rows</button><div id="peek"></div></div>
+</div>
+<p><small>Python (Flask) web front-end for the same modules as the desktop app: PBKDF2 passwords, HMAC-SHA256 token hashes, AES-256-GCM votes, SQLite transaction for one-time tokens.</small></p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+async function api(p,b){const r=await fetch(p,{method:b?"POST":"GET",headers:{"content-type":"application/json"},body:b?JSON.stringify(b):undefined});return r.json()}
+function show(id,ok,t){const e=$(id);e.className="msg "+(ok?"ok":"bad");e.textContent=t}
+function tab(n){$("student").className=n==1?"":"hide";$("admin").className=n==2?"":"hide";$("t1").className=n==1?"on":"";$("t2").className=n==2?"on":""}
+async function refresh(){const s=await api("/api/state");
+ $("status").innerHTML=`Voting is <b>${s.open?"OPEN":"CLOSED"}</b> &middot; deadline ${s.deadline} (server time, UTC on the host) &middot; tokens issued: ${s.tokens_issued}/10 &middot; votes cast: ${s.votes_cast}`;
+ if(!$("cands").innerHTML)$("cands").innerHTML=s.candidates.map(c=>`<label class="c"><input type="radio" name="c" value="${c}" style="width:auto"> ${c}</label>`).join("")}
+async function login(){const r=await api("/api/login",{student_id:$("sid").value.trim(),password:$("pw").value});
+ if(r.ok){$("token").value=r.token;show("loginMsg",true,"Token issued. Keep it private - it works once.")}else show("loginMsg",false,r.error);refresh()}
+async function confirmVote(){const c=document.querySelector("input[name=c]:checked");if(!c)return show("voteMsg",false,"Please select a candidate first.");
+ if(!confirm(`You are voting for ${c.value}.\nYou cannot change it later. Confirm?`))return;
+ const r=await api("/api/vote",{token:$("token").value.trim(),candidate:c.value});show("voteMsg",r.ok,r.ok?"Your vote was recorded. Thank you!":r.error);if(r.ok)$("token").value="";refresh()}
+async function setDeadline(){const r=await api("/api/admin/deadline",{passphrase:$("pass").value,deadline:$("dl").value});show("adminMsg",r.ok,r.ok?"Deadline updated":r.error);refresh()}
+async function closeVoting(){const r=await api("/api/admin/close",{passphrase:$("pass").value});show("adminMsg",r.ok,r.ok?"Voting closed":r.error);refresh()}
+async function count(){const r=await api("/api/admin/count",{passphrase:$("pass").value});if(!r.ok){$("results").innerHTML="";return show("adminMsg",false,r.error)}
+ show("adminMsg",true,r.result.kind=="winner"?"Winner: "+r.result.names[0]:r.result.kind=="tie"?"Tie between: "+r.result.names.join(", "):"No votes were cast");
+ $("results").innerHTML="<table><tr><th>Candidate</th><th>Votes</th></tr>"+Object.entries(r.counts).map(([c,n])=>`<tr><td>${c}</td><td>${n}</td></tr>`).join("")+"</table>"}
+async function resetDemo(){if(!confirm("Reset the whole demo?"))return;await api("/api/reset",{});$("results").innerHTML="";show("adminMsg",true,"Demo reset");refresh()}
+async function peek(){const r=await api("/api/votes-table");$("peek").innerHTML="<table><tr>"+r.columns.map(c=>`<th>${c}</th>`).join("")+"</tr>"+r.rows.map(v=>"<tr>"+v.map(x=>`<td>${x}...</td>`).join("")+"</tr>").join("")+"</table>"}
+refresh();
+</script></body></html>
